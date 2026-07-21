@@ -79,11 +79,16 @@
         <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-around;">
           {% for project in top_projects %}
           <div>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 19px; margin-bottom: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 19px; margin-bottom: 5px;">
               <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;">{{ project.name }}</span>
               <span style="font-weight: bold;">${{ project.c }}</span>
             </div>
-            <div style="background: #000; height: 12px; width: {{ project.w }}%;"></div>
+            <!-- 7-day sparkline, same day columns as the chart on the left -->
+            <div style="display: flex; align-items: flex-end; gap: 5px; height: 26px; border-bottom: 1px solid #999;">
+              {% for h in project.s %}
+              <div style="flex: 1; background: #000; height: {{ h | times: 26 | divided_by: 100 }}px;"></div>
+              {% endfor %}
+            </div>
           </div>
           {% endfor %}
         </div>

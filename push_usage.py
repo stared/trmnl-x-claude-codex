@@ -149,11 +149,14 @@ def get_codex_usage() -> dict:
     return {"codex_group": {"who": who, "tiles": tiles}}
 
 
-def run_ccusage(*args: str) -> dict:
-    since = (datetime.now() - timedelta(days=COST_DAYS - 1)).strftime("%Y%m%d")
+def run_ccusage(*args: str, since: str | None = None, until: str | None = None) -> dict:
+    if since is None:
+        since = (datetime.now() - timedelta(days=COST_DAYS - 1)).strftime("%Y%m%d")
+    cmd = ["pnpm", "dlx", "ccusage", *args, "--json", "--since", since]
+    if until:
+        cmd += ["--until", until]
     out = subprocess.run(
-        ["pnpm", "dlx", "ccusage", *args, "--json", "--since", since],
-        capture_output=True, text=True, check=True, timeout=120,
+        cmd, capture_output=True, text=True, check=True, timeout=120,
     ).stdout
     return json.loads(out)
 
@@ -188,14 +191,17 @@ def get_daily_costs() -> dict:
     return {"cost_days": days, "cost_week": round(sum(d["c"] for d in days))}
 
 
-def project_name_by_session() -> dict[str, str]:
-    """Map session UUID -> project basename, reading the real cwd from each JSONL."""
-    mapping: dict[str, str] = {}
+def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
+    """Map session UUID -> project basename (real cwd read from the JSONL),
+    and project basename -> its JSONL files."""
+    by_session: dict[str, str] = {}
+    files_by_name: dict[str, list[Path]] = {}
     for project_dir in CLAUDE_PROJECTS_DIR.iterdir():
         if not project_dir.is_dir():
             continue
         name = None
-        for jsonl in project_dir.glob("*.jsonl"):
+        jsonls = list(project_dir.glob("*.jsonl"))
+        for jsonl in jsonls:
             if name is None:
                 try:
                     with jsonl.open() as f:
@@ -208,23 +214,77 @@ def project_name_by_session() -> dict[str, str]:
                     pass
                 if name is None:
                     name = project_dir.name.rsplit("-", 1)[-1]
-            mapping[jsonl.stem] = name
-    return mapping
+            by_session[jsonl.stem] = name
+        if name:
+            files_by_name.setdefault(name, []).extend(jsonls)
+    return by_session, files_by_name
+
+
+def day_series(files: list[Path]) -> list[float]:
+    """Cost-weighted token activity per local day (oldest first) from JSONLs.
+
+    Relative pricing weights (input=1): output 5x, cache read 0.1x,
+    cache write 1.25x. Sparklines are scaled to each project's own peak,
+    so relative weights are as informative as exact dollars.
+    """
+    today = datetime.now().date()
+    start = today - timedelta(days=COST_DAYS - 1)
+    series = [0.0] * COST_DAYS
+    for path in files:
+        try:
+            if datetime.fromtimestamp(path.stat().st_mtime).date() < start:
+                continue
+            with path.open() as f:
+                for line in f:
+                    if '"usage"' not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    usage = (entry.get("message") or {}).get("usage")
+                    ts = entry.get("timestamp")
+                    if not usage or not ts:
+                        continue
+                    day = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().date()
+                    idx = (day - start).days
+                    if 0 <= idx < COST_DAYS:
+                        series[idx] += (
+                            (usage.get("input_tokens") or 0)
+                            + 5.0 * (usage.get("output_tokens") or 0)
+                            + 0.1 * (usage.get("cache_read_input_tokens") or 0)
+                            + 1.25 * (usage.get("cache_creation_input_tokens") or 0)
+                        )
+        except OSError:
+            continue
+    return series
 
 
 def get_top_projects() -> dict:
+    """Top projects by 7d cost (ccusage), each with a per-day sparkline series.
+
+    ccusage session totals aren't range-scoped per day, so the sparkline
+    comes from the project's own JSONLs via a price-weighted token proxy.
+    """
+    by_session, files_by_name = scan_projects()
     rows = run_ccusage("session").get("session", [])
-    names = project_name_by_session()
     totals: dict[str, float] = {}
     for r in rows:
-        name = names.get(r.get("period", ""))
+        name = by_session.get(r.get("period", ""))
         if name:  # skips non-Claude agents' sessions
             totals[name] = totals.get(name, 0) + (r.get("totalCost") or 0)
+
     top = sorted(totals.items(), key=lambda kv: -kv[1])[:TOP_PROJECTS]
-    max_cost = top[0][1] if top else 1
-    return {"top_projects": [
-        {"name": n[:24], "c": round(c), "w": round(100 * c / max_cost)} for n, c in top
-    ]}
+    projects = []
+    for name, cost in top:
+        series = day_series(files_by_name.get(name, []))
+        peak = max(series) or 1
+        projects.append({
+            "name": name[:24],
+            "c": round(cost),
+            "s": [round(100 * v / peak) for v in series],  # scaled to own peak
+        })
+    return {"top_projects": projects}
 
 
 def main() -> int:
@@ -279,8 +339,14 @@ def main() -> int:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        log(f"webhook response: {resp.status}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            log(f"webhook response: {resp.status}")
+    except urllib.error.HTTPError as e:
+        if e.code == 429:  # TRMNL cap: 12 pushes/hour — next run will catch up
+            log("webhook rate-limited (429), skipping this push")
+            return 0
+        raise
     return 0
 
 
