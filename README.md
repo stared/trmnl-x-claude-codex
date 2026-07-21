@@ -39,12 +39,18 @@ every 10 minutes from this Mac.
 
 ## Merge variables sent
 
-`claude_plan`, `claude_session_pct` / `_reset`, `claude_weekly_pct` / `_reset`,
-`claude_scoped` (list of per-model weekly limits: `name` / `pct` / `reset`),
-`codex_plan`, `codex_primary_pct` / `_label` / `_reset`, `codex_secondary_*`
-(when the plan has a second window), `cost_days` (7 entries: `d` day label,
-`c` $ rounded, `h` bar height 0–100), `cost_week`, `top_projects` (`name` /
-`c`), `claude_ok` / `codex_ok` / `costs_ok` / `projects_ok`, `updated_at`.
+`gauges` — flat list of rate-limit tiles (`who` provider+plan, `win` window
+label, `pct`, `reset`); Claude entries come from the endpoint's `limits` array
+(session, weekly, per-model weekly), Codex from primary/secondary windows.
+`cost_days` — 7 entries: `d` day label, `c` total $, `h1`/`h2` bar heights in
+px (Claude / other agents). `cost_week`, `top_projects` (`name` / `c`),
+`claude_ok` / `codex_ok` / `costs_ok` / `projects_ok`, `updated_at`.
+
+Note: ccusage prices Codex usage at $0 (no ChatGPT-plan pricing), so the cost
+chart's gray segment is other agents (e.g. opencode) for now.
+
+The template targets TRMNL X's logical viewport of ~936×702 px (the physical
+1872×1404 panel renders at 2× density).
 
 `config.json` (webhook UUID) is gitignored — anyone with the UUID can push
 screens to your device.

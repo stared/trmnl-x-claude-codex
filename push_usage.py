@@ -32,7 +32,8 @@ CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 COST_DAYS = 7
-TOP_PROJECTS = 3
+TOP_PROJECTS = 6
+CHART_MAX_PX = 140  # tallest bar in the template's chart area
 
 
 def log(msg: str) -> None:
@@ -77,19 +78,20 @@ def get_claude_usage() -> dict:
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.load(resp)
 
-    out = {"claude_plan": plan_label(creds), "claude_scoped": []}
+    who = f"Claude · {plan_label(creds)}".rstrip(" ·")
+    gauges = []
     for limit in data.get("limits", []):
         pct = round(limit.get("percent") or 0)
         reset = fmt_reset(datetime.fromisoformat(limit["resets_at"]))
         kind = limit.get("kind")
         if kind == "session":
-            out["claude_session_pct"], out["claude_session_reset"] = pct, reset
+            gauges.append({"who": who, "win": "Session 5h", "pct": pct, "reset": reset})
         elif kind == "weekly_all":
-            out["claude_weekly_pct"], out["claude_weekly_reset"] = pct, reset
+            gauges.append({"who": who, "win": "Weekly", "pct": pct, "reset": reset})
         elif kind == "weekly_scoped":
             model = ((limit.get("scope") or {}).get("model") or {}).get("display_name") or "?"
-            out["claude_scoped"].append({"name": model, "pct": pct, "reset": reset})
-    return out
+            gauges.append({"who": who, "win": f"Weekly · {model}", "pct": pct, "reset": reset})
+    return {"claude_gauges": gauges}
 
 
 def get_codex_usage() -> dict:
@@ -129,19 +131,22 @@ def get_codex_usage() -> dict:
         raise RuntimeError("no rate-limit response from codex app-server")
 
     limits = result["rateLimits"]
-    out = {"codex_plan": (limits.get("planType") or "").capitalize()}
-    for key, prefix in [("primary", "codex_primary"), ("secondary", "codex_secondary")]:
+    plan = (limits.get("planType") or "").capitalize()
+    who = f"Codex · {plan}".rstrip(" ·")
+    gauges = []
+    for key in ("primary", "secondary"):
         window = limits.get(key)
         if not window:
             continue
-        out[f"{prefix}_pct"] = round(window["usedPercent"])
         mins = window.get("windowDurationMins") or 0
-        out[f"{prefix}_label"] = (
-            "5h" if mins == 300 else "weekly" if mins == 10080 else f"{mins // 60}h"
-        )
+        win = "Session 5h" if mins == 300 else "Weekly" if mins == 10080 else f"{mins // 60}h"
         resets = datetime.fromtimestamp(window["resetsAt"], tz=timezone.utc)
-        out[f"{prefix}_reset"] = fmt_reset(resets)
-    return out
+        gauges.append({
+            "who": who, "win": win,
+            "pct": round(window["usedPercent"]),
+            "reset": fmt_reset(resets),
+        })
+    return {"codex_gauges": gauges}
 
 
 def run_ccusage(*args: str) -> dict:
@@ -154,17 +159,32 @@ def run_ccusage(*args: str) -> dict:
 
 
 def get_daily_costs() -> dict:
-    """API-equivalent $ per day across all agents ccusage detects (Claude, Codex, ...)."""
-    rows = run_ccusage("daily").get("daily", [])
-    by_day = {r["period"]: r.get("totalCost") or 0 for r in rows}
+    """API-equivalent $ per day: Claude Code vs other agents ccusage detects.
+
+    Note: ccusage reports $0 for Codex (no pricing for ChatGPT-plan usage),
+    so 'other' is effectively opencode & co. until that changes.
+    """
+    all_rows = run_ccusage("daily").get("daily", [])
+    claude_rows = run_ccusage("claude", "daily").get("daily", [])
+    total_by_day = {r["period"]: r.get("totalCost") or 0 for r in all_rows}
+    claude_by_day = {r["date"]: r.get("totalCost") or 0 for r in claude_rows}
+
     days = []
     today = datetime.now().date()
     for i in range(COST_DAYS - 1, -1, -1):
-        day = today - timedelta(days=i)
-        days.append({"d": day.strftime("%a")[:2], "c": round(by_day.get(day.isoformat(), 0))})
+        day = (today - timedelta(days=i)).isoformat()
+        total = total_by_day.get(day, 0)
+        claude = min(claude_by_day.get(day, 0), total)
+        days.append({
+            "d": (today - timedelta(days=i)).strftime("%a")[:2],
+            "c": round(total),
+            "claude": claude,
+            "other": total - claude,
+        })
     max_cost = max((d["c"] for d in days), default=0) or 1
     for d in days:
-        d["h"] = round(100 * d["c"] / max_cost)
+        d["h1"] = round(CHART_MAX_PX * d.pop("claude") / max_cost)
+        d["h2"] = round(CHART_MAX_PX * d.pop("other") / max_cost)
     return {"cost_days": days, "cost_week": round(sum(d["c"] for d in days))}
 
 
@@ -234,6 +254,11 @@ def main() -> int:
         except Exception as e:
             log(f"{ok_flag[:-3]} fetch failed: {e}")
             merge_vars[ok_flag] = False
+
+    # one flat tile list for the template: Claude gauges, then Codex
+    merge_vars["gauges"] = (
+        merge_vars.pop("claude_gauges", []) + merge_vars.pop("codex_gauges", [])
+    )
 
     payload = {"merge_variables": merge_vars}
     body = json.dumps(payload)

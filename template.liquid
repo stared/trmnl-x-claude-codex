@@ -1,118 +1,81 @@
 <!-- Paste into the Private Plugin "Markup" editor on trmnl.com.
-     Sized explicitly for TRMNL X (1872x1404, 16-grayscale). -->
+     TRMNL X renders at a ~936x702 logical viewport (2x pixel density) —
+     all sizes below target that. Design: gauge tile strip + cost chart
+     + top projects. Tiles at >=90% invert to black. -->
 
-<div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 26px 28px 0 28px; box-sizing: border-box;">
 
-  <!-- Row 1: rate limits -->
-  <div style="display: flex; gap: 100px; padding: 50px 70px 0 70px;">
-
-    <!-- Claude Code -->
-    <div style="flex: 1;">
-      <div style="font-size: 58px; font-weight: bold; margin-bottom: 36px;">Claude Code{% if claude_plan %} · {{ claude_plan }}{% endif %}</div>
-      {% if claude_ok %}
-        <div style="margin-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 38px; margin-bottom: 12px;">
-            <span>Session (5h)</span>
-            <span style="font-size: 50px; font-weight: bold;">{{ claude_session_pct }}%</span>
-          </div>
-          <div style="border: 4px solid black; height: 48px;">
-            <div style="background: black; height: 100%; width: {{ claude_session_pct }}%;"></div>
-          </div>
-          <div style="font-size: 30px; margin-top: 8px; color: #555;">resets {{ claude_session_reset }}</div>
-        </div>
-        <div style="margin-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 38px; margin-bottom: 12px;">
-            <span>Weekly</span>
-            <span style="font-size: 50px; font-weight: bold;">{{ claude_weekly_pct }}%</span>
-          </div>
-          <div style="border: 4px solid black; height: 48px;">
-            <div style="background: black; height: 100%; width: {{ claude_weekly_pct }}%;"></div>
-          </div>
-          <div style="font-size: 30px; margin-top: 8px; color: #555;">resets {{ claude_weekly_reset }}</div>
-        </div>
-        {% for scoped in claude_scoped %}
-        <div style="margin-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 38px; margin-bottom: 12px;">
-            <span>Weekly · {{ scoped.name }}</span>
-            <span style="font-size: 50px; font-weight: bold;">{{ scoped.pct }}%</span>
-          </div>
-          <div style="border: 4px solid black; height: 48px;">
-            <div style="background: black; height: 100%; width: {{ scoped.pct }}%;"></div>
-          </div>
-          <div style="font-size: 30px; margin-top: 8px; color: #555;">resets {{ scoped.reset }}</div>
-        </div>
-        {% endfor %}
+  <!-- gauge tile strip -->
+  <div style="display: flex; gap: 18px;">
+    {% for g in gauges %}
+      {% if g.pct >= 90 %}
+        {% assign tile_bg = "background: #000; color: #fff;" %}
+        {% assign bar_edge = "#fff" %}
+        {% assign bar_fill = "#fff" %}
+        {% assign reset_color = "#bbb" %}
       {% else %}
-        <div style="font-size: 38px; color: #555;">no data</div>
+        {% assign tile_bg = "" %}
+        {% assign bar_edge = "#000" %}
+        {% assign bar_fill = "#000" %}
+        {% assign reset_color = "#555" %}
       {% endif %}
-    </div>
-
-    <!-- Codex -->
-    <div style="flex: 1;">
-      <div style="font-size: 58px; font-weight: bold; margin-bottom: 36px;">Codex{% if codex_plan %} · {{ codex_plan }}{% endif %}</div>
-      {% if codex_ok %}
-        <div style="margin-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 38px; margin-bottom: 12px;">
-            <span>{{ codex_primary_label | capitalize }}</span>
-            <span style="font-size: 50px; font-weight: bold;">{{ codex_primary_pct }}%</span>
-          </div>
-          <div style="border: 4px solid black; height: 48px;">
-            <div style="background: black; height: 100%; width: {{ codex_primary_pct }}%;"></div>
-          </div>
-          <div style="font-size: 30px; margin-top: 8px; color: #555;">resets {{ codex_primary_reset }}</div>
+      <div style="flex: 1; border: 3px solid #000; padding: 15px 17px 17px; {{ tile_bg }}">
+        <div style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">{{ g.who }}</div>
+        <div style="font-size: 18px; font-weight: bold; margin-bottom: 11px;">{{ g.win }}</div>
+        <div style="font-size: 52px; font-weight: bold; line-height: 1; margin-bottom: 13px;">{{ g.pct }}%</div>
+        <div style="border: 2px solid {{ bar_edge }}; height: 20px; margin-bottom: 9px;">
+          <div style="background: {{ bar_fill }}; height: 100%; width: {{ g.pct }}%;"></div>
         </div>
-        {% if codex_secondary_pct %}
-        <div style="margin-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 38px; margin-bottom: 12px;">
-            <span>{{ codex_secondary_label | capitalize }}</span>
-            <span style="font-size: 50px; font-weight: bold;">{{ codex_secondary_pct }}%</span>
-          </div>
-          <div style="border: 4px solid black; height: 48px;">
-            <div style="background: black; height: 100%; width: {{ codex_secondary_pct }}%;"></div>
-          </div>
-          <div style="font-size: 30px; margin-top: 8px; color: #555;">resets {{ codex_secondary_reset }}</div>
-        </div>
-        {% endif %}
-      {% else %}
-        <div style="font-size: 38px; color: #555;">no data</div>
-      {% endif %}
-    </div>
-
+        <div style="font-size: 13px; color: {{ reset_color }};">resets {{ g.reset }}</div>
+      </div>
+    {% endfor %}
+    {% if gauges == empty %}
+      <div style="font-size: 18px; color: #555;">no rate-limit data</div>
+    {% endif %}
   </div>
 
-  <!-- Row 2: cost chart + top projects -->
-  <div style="display: flex; gap: 100px; padding: 30px 70px 0 70px;">
+  <!-- bottom band: cost chart + top projects -->
+  <div style="display: flex; gap: 38px; margin-top: 24px; flex: 1; min-height: 0;">
 
-    <!-- $ per day -->
-    <div style="flex: 1;">
+    <!-- $ per day (stacked: black = Claude Code, gray = other agents) -->
+    <div style="flex: 1; min-width: 0;">
       {% if costs_ok %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px;">
-          <span style="font-size: 42px; font-weight: bold;">API-equivalent $ / day</span>
-          <span style="font-size: 42px;">${{ cost_week }} / 7d</span>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 13px;">
+          <span style="font-size: 18px; font-weight: bold;">API-equivalent $ / day</span>
+          <span style="font-size: 18px;">${{ cost_week }} · 7d</span>
         </div>
-        <div style="display: flex; align-items: flex-end; gap: 24px; height: 220px;">
+        <div style="display: flex; align-items: flex-end; gap: 13px; height: 165px;">
           {% for day in cost_days %}
-          <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%;">
-            <div style="font-size: 26px; text-align: center; margin-bottom: 4px;">${{ day.c }}</div>
-            <div style="background: black; width: 100%; height: {{ day.h | times: 1.6 }}px;"></div>
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; text-align: center;">
+            <div style="font-size: 13px; margin-bottom: 4px;">${{ day.c }}</div>
+            <div style="background: #999; width: 100%; height: {{ day.h2 }}px;"></div>
+            <div style="background: #000; width: 100%; height: {{ day.h1 }}px;"></div>
           </div>
           {% endfor %}
         </div>
-        <div style="display: flex; gap: 24px; margin-top: 8px;">
+        <div style="display: flex; gap: 13px; margin-top: 5px;">
           {% for day in cost_days %}
-          <div style="flex: 1; font-size: 28px; text-align: center; color: #555;">{{ day.d }}</div>
+          <div style="flex: 1; font-size: 14px; text-align: center; color: #555;">{{ day.d }}</div>
           {% endfor %}
+        </div>
+        <div style="font-size: 13px; color: #555; margin-top: 8px;">
+          <span style="display: inline-block; width: 12px; height: 12px; background: #000;"></span> Claude Code
+          &nbsp;&nbsp;
+          <span style="display: inline-block; width: 12px; height: 12px; background: #999;"></span> other agents
         </div>
       {% endif %}
     </div>
 
-    <!-- Top projects -->
-    <div style="flex: 1;">
+    <!-- top projects -->
+    <div style="flex: 1; min-width: 0;">
       {% if projects_ok %}
-        <div style="font-size: 42px; font-weight: bold; margin-bottom: 20px;">Top projects (7d)</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 6px;">
+          <span style="font-size: 18px; font-weight: bold;">Top projects · 7d</span>
+          <span style="font-size: 14px; color: #555;">Claude Code</span>
+        </div>
         {% for project in top_projects %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 36px; padding: 12px 0; border-bottom: 2px solid #999;">
-          <span>{{ forloop.index }}. {{ project.name }}</span>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 19px; padding: 9px 0; border-bottom: 1px solid #999;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;">{{ forloop.index }}. {{ project.name }}</span>
           <span style="font-weight: bold;">${{ project.c }}</span>
         </div>
         {% endfor %}
