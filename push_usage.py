@@ -33,7 +33,7 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 COST_DAYS = 7
 TOP_PROJECTS = 6
-CHART_MAX_PX = 140  # tallest bar in the template's chart area
+CHART_MAX_PX = 230  # tallest bar in the template's chart area
 
 
 def log(msg: str) -> None:
@@ -78,20 +78,20 @@ def get_claude_usage() -> dict:
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.load(resp)
 
-    who = f"Claude · {plan_label(creds)}".rstrip(" ·")
-    gauges = []
+    tiles = []
     for limit in data.get("limits", []):
         pct = round(limit.get("percent") or 0)
         reset = fmt_reset(datetime.fromisoformat(limit["resets_at"]))
         kind = limit.get("kind")
         if kind == "session":
-            gauges.append({"who": who, "win": "Session 5h", "pct": pct, "reset": reset})
+            tiles.append({"win": "Session 5h", "pct": pct, "reset": reset})
         elif kind == "weekly_all":
-            gauges.append({"who": who, "win": "Weekly", "pct": pct, "reset": reset})
+            tiles.append({"win": "Weekly", "pct": pct, "reset": reset})
         elif kind == "weekly_scoped":
             model = ((limit.get("scope") or {}).get("model") or {}).get("display_name") or "?"
-            gauges.append({"who": who, "win": f"Weekly · {model}", "pct": pct, "reset": reset})
-    return {"claude_gauges": gauges}
+            tiles.append({"win": f"Weekly · {model}", "pct": pct, "reset": reset})
+    who = f"Claude Code · {plan_label(creds)}".rstrip(" ·")
+    return {"claude_group": {"who": who, "tiles": tiles}}
 
 
 def get_codex_usage() -> dict:
@@ -131,9 +131,7 @@ def get_codex_usage() -> dict:
         raise RuntimeError("no rate-limit response from codex app-server")
 
     limits = result["rateLimits"]
-    plan = (limits.get("planType") or "").capitalize()
-    who = f"Codex · {plan}".rstrip(" ·")
-    gauges = []
+    tiles = []
     for key in ("primary", "secondary"):
         window = limits.get(key)
         if not window:
@@ -141,12 +139,14 @@ def get_codex_usage() -> dict:
         mins = window.get("windowDurationMins") or 0
         win = "Session 5h" if mins == 300 else "Weekly" if mins == 10080 else f"{mins // 60}h"
         resets = datetime.fromtimestamp(window["resetsAt"], tz=timezone.utc)
-        gauges.append({
-            "who": who, "win": win,
+        tiles.append({
+            "win": win,
             "pct": round(window["usedPercent"]),
             "reset": fmt_reset(resets),
         })
-    return {"codex_gauges": gauges}
+    plan = (limits.get("planType") or "").capitalize()
+    who = f"Codex · {plan}".rstrip(" ·")
+    return {"codex_group": {"who": who, "tiles": tiles}}
 
 
 def run_ccusage(*args: str) -> dict:
@@ -221,7 +221,10 @@ def get_top_projects() -> dict:
         if name:  # skips non-Claude agents' sessions
             totals[name] = totals.get(name, 0) + (r.get("totalCost") or 0)
     top = sorted(totals.items(), key=lambda kv: -kv[1])[:TOP_PROJECTS]
-    return {"top_projects": [{"name": n[:24], "c": round(c)} for n, c in top]}
+    max_cost = top[0][1] if top else 1
+    return {"top_projects": [
+        {"name": n[:24], "c": round(c), "w": round(100 * c / max_cost)} for n, c in top
+    ]}
 
 
 def main() -> int:
@@ -255,10 +258,10 @@ def main() -> int:
             log(f"{ok_flag[:-3]} fetch failed: {e}")
             merge_vars[ok_flag] = False
 
-    # one flat tile list for the template: Claude gauges, then Codex
-    merge_vars["gauges"] = (
-        merge_vars.pop("claude_gauges", []) + merge_vars.pop("codex_gauges", [])
-    )
+    # provider groups for the template (header stated once per group)
+    merge_vars["gauge_groups"] = [
+        g for g in (merge_vars.pop("claude_group", None), merge_vars.pop("codex_group", None)) if g
+    ]
 
     payload = {"merge_variables": merge_vars}
     body = json.dumps(payload)

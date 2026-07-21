@@ -1,64 +1,67 @@
 <!-- Paste into the Private Plugin "Markup" editor on trmnl.com.
-     TRMNL X renders at a ~936x702 logical viewport (2x pixel density) —
-     all sizes below target that. Design: gauge tile strip + cost chart
-     + top projects. Tiles at >=90% invert to black. -->
+     TRMNL X renders at a ~936x702 logical viewport (2x pixel density).
+     Layout: provider gauge groups + $/day chart + top-project bars.
+     Tiles at >=90% invert to black. No title bar; "updated" sits bottom-right. -->
 
-<div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 26px 28px 0 28px; box-sizing: border-box;">
+<div style="height: 100%; display: flex; flex-direction: column; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 26px 28px 14px 28px; box-sizing: border-box;">
 
-  <!-- gauge tile strip -->
-  <div style="display: flex; gap: 18px;">
-    {% for g in gauges %}
-      {% if g.pct >= 90 %}
-        {% assign tile_bg = "background: #000; color: #fff;" %}
-        {% assign bar_edge = "#fff" %}
-        {% assign bar_fill = "#fff" %}
-        {% assign reset_color = "#bbb" %}
-      {% else %}
-        {% assign tile_bg = "" %}
-        {% assign bar_edge = "#000" %}
-        {% assign bar_fill = "#000" %}
-        {% assign reset_color = "#555" %}
-      {% endif %}
-      <div style="flex: 1; border: 3px solid #000; padding: 15px 17px 17px; {{ tile_bg }}">
-        <div style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">{{ g.who }}</div>
-        <div style="font-size: 18px; font-weight: bold; margin-bottom: 11px;">{{ g.win }}</div>
-        <div style="font-size: 52px; font-weight: bold; line-height: 1; margin-bottom: 13px;">{{ g.pct }}%</div>
-        <div style="border: 2px solid {{ bar_edge }}; height: 20px; margin-bottom: 9px;">
-          <div style="background: {{ bar_fill }}; height: 100%; width: {{ g.pct }}%;"></div>
-        </div>
-        <div style="font-size: 13px; color: {{ reset_color }};">resets {{ g.reset }}</div>
+  <!-- gauge groups: provider named once, tiles share the row -->
+  <div style="display: flex; gap: 30px;">
+    {% for group in gauge_groups %}
+    <div style="flex: {{ group.tiles | size }}; min-width: 0;">
+      <div style="font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;">{{ group.who }}</div>
+      <div style="display: flex; gap: 18px;">
+        {% for g in group.tiles %}
+          {% if g.pct >= 90 %}
+            {% assign tile_bg = "background: #000; color: #fff;" %}
+            {% assign bar_edge = "#fff" %}
+            {% assign bar_fill = "#fff" %}
+            {% assign reset_color = "#bbb" %}
+          {% else %}
+            {% assign tile_bg = "" %}
+            {% assign bar_edge = "#000" %}
+            {% assign bar_fill = "#000" %}
+            {% assign reset_color = "#555" %}
+          {% endif %}
+          <div style="flex: 1; border: 3px solid #000; padding: 15px 17px 16px; {{ tile_bg }}">
+            <div style="font-size: 18px; font-weight: bold; margin-bottom: 12px;">{{ g.win }}</div>
+            <div style="font-size: 56px; font-weight: bold; line-height: 1; margin-bottom: 14px;">{{ g.pct }}%</div>
+            <div style="border: 2px solid {{ bar_edge }}; height: 20px; margin-bottom: 9px;">
+              <div style="background: {{ bar_fill }}; height: 100%; width: {{ g.pct }}%;"></div>
+            </div>
+            <div style="font-size: 13px; color: {{ reset_color }};">resets {{ g.reset }}</div>
+          </div>
+        {% endfor %}
       </div>
+    </div>
     {% endfor %}
-    {% if gauges == empty %}
-      <div style="font-size: 18px; color: #555;">no rate-limit data</div>
-    {% endif %}
   </div>
 
-  <!-- bottom band: cost chart + top projects -->
-  <div style="display: flex; gap: 38px; margin-top: 24px; flex: 1; min-height: 0;">
+  <!-- bottom band fills the rest -->
+  <div style="display: flex; gap: 38px; margin-top: 26px; flex: 1; min-height: 0;">
 
     <!-- $ per day (stacked: black = Claude Code, gray = other agents) -->
-    <div style="flex: 1; min-width: 0;">
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
       {% if costs_ok %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 13px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 14px;">
           <span style="font-size: 18px; font-weight: bold;">API-equivalent $ / day</span>
           <span style="font-size: 18px;">${{ cost_week }} · 7d</span>
         </div>
-        <div style="display: flex; align-items: flex-end; gap: 13px; height: 165px;">
+        <div style="display: flex; align-items: flex-end; gap: 13px; flex: 1;">
           {% for day in cost_days %}
           <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; text-align: center;">
-            <div style="font-size: 13px; margin-bottom: 4px;">${{ day.c }}</div>
+            <div style="font-size: 14px; margin-bottom: 4px;">${{ day.c }}</div>
             <div style="background: #999; width: 100%; height: {{ day.h2 }}px;"></div>
             <div style="background: #000; width: 100%; height: {{ day.h1 }}px;"></div>
           </div>
           {% endfor %}
         </div>
-        <div style="display: flex; gap: 13px; margin-top: 5px;">
+        <div style="display: flex; gap: 13px; margin-top: 6px;">
           {% for day in cost_days %}
           <div style="flex: 1; font-size: 14px; text-align: center; color: #555;">{{ day.d }}</div>
           {% endfor %}
         </div>
-        <div style="font-size: 13px; color: #555; margin-top: 8px;">
+        <div style="font-size: 13px; color: #555; margin-top: 10px;">
           <span style="display: inline-block; width: 12px; height: 12px; background: #000;"></span> Claude Code
           &nbsp;&nbsp;
           <span style="display: inline-block; width: 12px; height: 12px; background: #999;"></span> other agents
@@ -66,27 +69,29 @@
       {% endif %}
     </div>
 
-    <!-- top projects -->
-    <div style="flex: 1; min-width: 0;">
+    <!-- top projects with bars -->
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
       {% if projects_ok %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 8px;">
           <span style="font-size: 18px; font-weight: bold;">Top projects · 7d</span>
           <span style="font-size: 14px; color: #555;">Claude Code</span>
         </div>
-        {% for project in top_projects %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 19px; padding: 9px 0; border-bottom: 1px solid #999;">
-          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;">{{ forloop.index }}. {{ project.name }}</span>
-          <span style="font-weight: bold;">${{ project.c }}</span>
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-around;">
+          {% for project in top_projects %}
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 19px; margin-bottom: 4px;">
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;">{{ project.name }}</span>
+              <span style="font-weight: bold;">${{ project.c }}</span>
+            </div>
+            <div style="background: #000; height: 12px; width: {{ project.w }}%;"></div>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
       {% endif %}
     </div>
 
   </div>
 
-  <div class="title_bar">
-    <span class="title">AI Usage</span>
-    <span class="instance">updated {{ updated_at }}</span>
-  </div>
+  <div style="text-align: right; font-size: 13px; color: #555; margin-top: 10px;">updated {{ updated_at }}</div>
 
 </div>
