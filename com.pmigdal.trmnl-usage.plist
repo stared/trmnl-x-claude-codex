@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pmigdal.trmnl-usage</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/pmigdal/.local/share/mise/installs/uv/latest/uv-aarch64-apple-darwin/uv</string>
+    <string>run</string>
+    <string>--no-project</string>
+    <string>/Users/pmigdal/my_repos/vibe_coding/trmnlx/push_usage.py</string>
+  </array>
+
+  <!-- every 10 minutes; missed runs (sleep) fire once on wake -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/trmnl-usage.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/trmnl-usage.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/pmigdal/.local/bin</string>
+  </dict>
+</dict>
+</plist>
