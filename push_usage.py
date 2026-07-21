@@ -162,15 +162,21 @@ def run_ccusage(*args: str, since: str | None = None, until: str | None = None) 
 
 
 def get_daily_costs() -> dict:
-    """API-equivalent $ per day: Claude Code vs other agents ccusage detects.
-
-    Note: ccusage reports $0 for Codex (no pricing for ChatGPT-plan usage),
-    so 'other' is effectively opencode & co. until that changes.
-    """
-    all_rows = run_ccusage("daily").get("daily", [])
-    claude_rows = run_ccusage("claude", "daily").get("daily", [])
-    total_by_day = {r["period"]: r.get("totalCost") or 0 for r in all_rows}
-    claude_by_day = {r["date"]: r.get("totalCost") or 0 for r in claude_rows}
+    """API-equivalent $ per day: Claude Code vs other agents ccusage detects
+    (Codex, opencode, ...), with the actually-contributing agents named."""
+    rows = run_ccusage("daily", "--by-agent").get("daily", [])
+    total_by_day: dict[str, float] = {}
+    claude_by_day: dict[str, float] = {}
+    other_agents: set[str] = set()
+    for r in rows:
+        day = r["period"]
+        total_by_day[day] = r.get("totalCost") or 0
+        for a in r.get("agents", []):
+            cost = sum(m.get("cost") or 0 for m in a.get("modelBreakdowns", []))
+            if a.get("agent") == "claude":
+                claude_by_day[day] = claude_by_day.get(day, 0) + cost
+            elif cost > 0:  # only name agents that contribute real $
+                other_agents.add(a["agent"])
 
     days = []
     today = datetime.now().date()
@@ -188,7 +194,11 @@ def get_daily_costs() -> dict:
     for d in days:
         d["h1"] = round(CHART_MAX_PX * d.pop("claude") / max_cost)
         d["h2"] = round(CHART_MAX_PX * d.pop("other") / max_cost)
-    return {"cost_days": days, "cost_week": round(sum(d["c"] for d in days))}
+    return {
+        "cost_days": days,
+        "cost_week": round(sum(d["c"] for d in days)),
+        "other_label": ", ".join(sorted(other_agents)),  # e.g. "opencode" — "" hides the legend entry
+    }
 
 
 def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:

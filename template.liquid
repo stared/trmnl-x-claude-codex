@@ -63,8 +63,10 @@
         </div>
         <div style="font-size: 13px; color: #555; margin-top: 10px;">
           <span style="display: inline-block; width: 12px; height: 12px; background: #000;"></span> Claude Code
+          {% if other_label != "" and other_label %}
           &nbsp;&nbsp;
-          <span style="display: inline-block; width: 12px; height: 12px; background: #999;"></span> other agents
+          <span style="display: inline-block; width: 12px; height: 12px; background: #999;"></span> {{ other_label }}
+          {% endif %}
         </div>
       {% endif %}
     </div>

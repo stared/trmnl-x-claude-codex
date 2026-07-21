@@ -46,8 +46,9 @@ label, `pct`, `reset`); Claude entries come from the endpoint's `limits` array
 px (Claude / other agents). `cost_week`, `top_projects` (`name` / `c`),
 `claude_ok` / `codex_ok` / `costs_ok` / `projects_ok`, `updated_at`.
 
-Note: ccusage prices Codex usage at $0 (no ChatGPT-plan pricing), so the cost
-chart's gray segment is other agents (e.g. opencode) for now.
+The chart's gray segment is non-Claude agents; `other_label` names the ones
+with nonzero cost (use `ccusage daily --by-agent` — the per-agent
+subcommands may show $0 where the unified report prices the same usage).
 
 The template targets TRMNL X's logical viewport of ~936×702 px (the physical
 1872×1404 panel renders at 2× density).
