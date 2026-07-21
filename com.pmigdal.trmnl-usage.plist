@@ -27,7 +27,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/pmigdal/.local/bin</string>
+    <string>/Users/pmigdal/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/pmigdal/.local/bin</string>
   </dict>
 </dict>
 </plist>

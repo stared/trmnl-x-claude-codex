@@ -305,18 +305,22 @@ def main() -> int:
         "updated_at": datetime.now().astimezone().strftime("%a %H:%M"),
     }
 
+    errors: list[str] = []
     for fetch, ok_flag in [
         (get_claude_usage, "claude_ok"),
         (get_codex_usage, "codex_ok"),
         (get_daily_costs, "costs_ok"),
         (get_top_projects, "projects_ok"),
     ]:
+        section = ok_flag[:-3]
         try:
             merge_vars.update(fetch())
             merge_vars[ok_flag] = True
         except Exception as e:
-            log(f"{ok_flag[:-3]} fetch failed: {e}")
+            log(f"{section} fetch failed: {e}")
             merge_vars[ok_flag] = False
+            errors.append(f"{section}: {str(e)[:80]}")
+    merge_vars["errors"] = errors  # rendered as a warning strip on the device
 
     # provider groups for the template (header stated once per group)
     merge_vars["gauge_groups"] = [
@@ -328,7 +332,7 @@ def main() -> int:
     log(f"payload ({len(body)} bytes): {body}")
 
     if args.dry_run:
-        return 0
+        return 1 if errors else 0
 
     req = urllib.request.Request(
         webhook_url,
@@ -344,10 +348,11 @@ def main() -> int:
             log(f"webhook response: {resp.status}")
     except urllib.error.HTTPError as e:
         if e.code == 429:  # TRMNL cap: 12 pushes/hour — next run will catch up
-            log("webhook rate-limited (429), skipping this push")
-            return 0
+            log("webhook rate-limited (429), data not delivered this round")
+            return 1
         raise
-    return 0
+    # non-zero when any section failed, so launchctl/logs show degraded runs
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
