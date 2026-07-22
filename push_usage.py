@@ -31,9 +31,12 @@ from pathlib import Path
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
-COST_DAYS = 7
-TOP_PROJECTS = 6
-CHART_MAX_PX = 230  # tallest bar in the template's chart area
+
+CONFIG_PATH = Path(__file__).parent / "config.json"
+CONFIG: dict = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
+COST_DAYS = int(CONFIG.get("cost_days", 7))
+TOP_PROJECTS = int(CONFIG.get("top_projects", 6))
+CHART_MAX_PX = int(CONFIG.get("chart_max_px", 230))  # tallest chart bar
 
 
 def log(msg: str) -> None:
@@ -321,11 +324,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="print payload, skip webhook POST")
     args = parser.parse_args()
 
-    webhook_url = os.environ.get("TRMNL_WEBHOOK_URL")
-    if not webhook_url:
-        config_path = Path(__file__).parent / "config.json"
-        if config_path.exists():
-            webhook_url = json.loads(config_path.read_text()).get("webhook_url")
+    webhook_url = os.environ.get("TRMNL_WEBHOOK_URL") or CONFIG.get("webhook_url")
     if not webhook_url and not args.dry_run:
         log("ERROR: no webhook URL — set TRMNL_WEBHOOK_URL or create config.json")
         return 1
