@@ -4,6 +4,8 @@ An e-ink dashboard for a [TRMNL](https://trmnl.com) private plugin: rate
 limits for Claude Code and Codex, API-equivalent $ per day per agent, and
 your top projects — pushed from your Mac every 10 minutes.
 
+![](./trmnl-x-claude-codex-photo.jpg)
+
 Data sources (no servers, everything reads local state):
 
 - **Claude limits + plan** — undocumented `api.anthropic.com/api/oauth/usage`
