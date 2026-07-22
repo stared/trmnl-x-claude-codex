@@ -162,42 +162,61 @@ def run_ccusage(*args: str, since: str | None = None, until: str | None = None) 
 
 
 def get_daily_costs() -> dict:
-    """API-equivalent $ per day: Claude Code vs other agents ccusage detects
-    (Codex, opencode, ...), with the actually-contributing agents named."""
+    """API-equivalent $ per day, stacked per agent (Claude, Codex, opencode, ...).
+
+    Top NAMED_AGENTS by weekly cost get their own shade and legend entry;
+    the remainder is lumped as 'other'.
+    """
+    NAMED_AGENTS = 3
+    SHADES = ["#000", "#777", "#aaa"]  # by rank; lump uses LUMP_SHADE
+    LUMP_SHADE = "#ccc"
+
     rows = run_ccusage("daily", "--by-agent").get("daily", [])
-    total_by_day: dict[str, float] = {}
-    claude_by_day: dict[str, float] = {}
-    other_agents: set[str] = set()
+    cost: dict[str, dict[str, float]] = {}  # agent -> day -> $
     for r in rows:
-        day = r["period"]
-        total_by_day[day] = r.get("totalCost") or 0
         for a in r.get("agents", []):
-            cost = sum(m.get("cost") or 0 for m in a.get("modelBreakdowns", []))
-            if a.get("agent") == "claude":
-                claude_by_day[day] = claude_by_day.get(day, 0) + cost
-            elif cost > 0:  # only name agents that contribute real $
-                other_agents.add(a["agent"])
+            c = sum(m.get("cost") or 0 for m in a.get("modelBreakdowns", []))
+            if c > 0:
+                agent_costs = cost.setdefault(a.get("agent") or "?", {})
+                agent_costs[r["period"]] = agent_costs.get(r["period"], 0) + c
+
+    ranked = sorted(cost, key=lambda a: -sum(cost[a].values()))
+    ranked.sort(key=lambda a: a != "claude")  # Claude first, keep cost order after
+    named, lumped = ranked[:NAMED_AGENTS], ranked[NAMED_AGENTS:]
+
+    today = datetime.now().date()
+    dates = [(today - timedelta(days=i)) for i in range(COST_DAYS - 1, -1, -1)]
+    per_day_totals = {
+        d.isoformat(): sum(cost[a].get(d.isoformat(), 0) for a in ranked) for d in dates
+    }
+    max_cost = max(per_day_totals.values(), default=0) or 1
 
     days = []
-    today = datetime.now().date()
-    for i in range(COST_DAYS - 1, -1, -1):
-        day = (today - timedelta(days=i)).isoformat()
-        total = total_by_day.get(day, 0)
-        claude = min(claude_by_day.get(day, 0), total)
+    for d in dates:
+        key = d.isoformat()
+        segs = [
+            {"h": round(CHART_MAX_PX * cost[a].get(key, 0) / max_cost), "s": SHADES[i]}
+            for i, a in enumerate(named)
+        ] + [{
+            "h": round(CHART_MAX_PX * sum(cost[a].get(key, 0) for a in lumped) / max_cost),
+            "s": LUMP_SHADE,
+        }]
         days.append({
-            "d": (today - timedelta(days=i)).strftime("%a")[:2],
-            "c": round(total),
-            "claude": claude,
-            "other": total - claude,
+            "d": d.strftime("%a")[:2],
+            "c": round(per_day_totals[key]),
+            "seg": [s for s in segs if s["h"] > 0],
         })
-    max_cost = max((d["c"] for d in days), default=0) or 1
-    for d in days:
-        d["h1"] = round(CHART_MAX_PX * d.pop("claude") / max_cost)
-        d["h2"] = round(CHART_MAX_PX * d.pop("other") / max_cost)
+
+    legend = [
+        {"label": "Claude Code" if a == "claude" else a, "s": SHADES[i]}
+        for i, a in enumerate(named)
+    ]
+    if lumped:
+        legend.append({"label": "other", "s": LUMP_SHADE})
     return {
         "cost_days": days,
-        "cost_week": round(sum(d["c"] for d in days)),
-        "other_label": ", ".join(sorted(other_agents)),  # e.g. "opencode" — "" hides the legend entry
+        "cost_week": round(sum(per_day_totals.values())),
+        "cost_legend": legend,
     }
 
 
