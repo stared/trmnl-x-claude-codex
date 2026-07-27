@@ -7,7 +7,11 @@
 Data sources:
 - Claude rate limits + plan: undocumented https://api.anthropic.com/api/oauth/usage
   endpoint; OAuth token + subscription tier from the macOS Keychain
-  ("Claude Code-credentials").
+  ("Claude Code-credentials"). Expired tokens are refreshed via the OAuth
+  refresh grant and written back to the Keychain.
+
+Resilience: each section's last good result is cached in state.json; if a
+fetch fails, the cached data is shown with a "data from <time>" note.
 - Codex rate limits: `codex app-server` JSON-RPC (account/rateLimits/read).
 - Cost per day (API-equivalent $, all detected agents) and top Claude projects:
   ccusage via `pnpm dlx`, plus ~/.claude/projects/ for session->project mapping.
@@ -21,6 +25,7 @@ Usage:  uv run push_usage.py [--dry-run]
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -29,7 +34,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code's public OAuth client
 KEYCHAIN_SERVICE = "Claude Code-credentials"
+STATE_PATH = Path(__file__).parent / "state.json"  # last-known-good data per section
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -51,12 +59,65 @@ def fmt_reset(dt: datetime) -> str:
     return local.strftime("%a %d %b, %H:%M")
 
 
-def keychain_creds() -> dict:
+def keychain_item() -> dict:
     creds_json = subprocess.run(
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
-    return json.loads(creds_json)["claudeAiOauth"]
+    return json.loads(creds_json)
+
+
+def keychain_account() -> str:
+    meta = subprocess.run(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    match = re.search(r'"acct"<blob>="([^"]*)"', meta)
+    if not match:
+        raise RuntimeError("cannot read keychain account name")
+    return match.group(1)
+
+
+def refresh_claude_token(item: dict) -> dict:
+    """Exchange the stored refresh token for a fresh access token.
+
+    The rotated credentials are written back to the Keychain (same item
+    Claude Code uses) so both this script and Claude Code stay logged in.
+    """
+    oauth = item["claudeAiOauth"]
+    req = urllib.request.Request(
+        OAUTH_TOKEN_URL,
+        data=json.dumps({
+            "grant_type": "refresh_token",
+            "refresh_token": oauth["refreshToken"],
+            "client_id": OAUTH_CLIENT_ID,
+        }).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        tok = json.load(resp)
+    oauth.update({
+        "accessToken": tok["access_token"],
+        "refreshToken": tok.get("refresh_token") or oauth["refreshToken"],
+        "expiresAt": int((time.time() + tok["expires_in"]) * 1000),
+    })
+    subprocess.run(
+        ["security", "add-generic-password", "-U", "-a", keychain_account(),
+         "-s", KEYCHAIN_SERVICE, "-w", json.dumps(item)],
+        capture_output=True, check=True,
+    )
+    log("claude: OAuth token refreshed")
+    return oauth
+
+
+def fresh_claude_creds() -> dict:
+    """Keychain creds, refreshed first when the access token is (nearly) expired."""
+    item = keychain_item()
+    oauth = item["claudeAiOauth"]
+    if oauth.get("expiresAt", 0) > (time.time() + 60) * 1000:
+        return oauth
+    return refresh_claude_token(item)
 
 
 def plan_label(creds: dict) -> str:
@@ -70,16 +131,26 @@ def plan_label(creds: dict) -> str:
 
 
 def get_claude_usage() -> dict:
-    creds = keychain_creds()
-    req = urllib.request.Request(
-        CLAUDE_USAGE_URL,
-        headers={
-            "Authorization": f"Bearer {creds['accessToken']}",
-            "anthropic-beta": "oauth-2025-04-20",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.load(resp)
+    def fetch(creds: dict) -> dict:
+        req = urllib.request.Request(
+            CLAUDE_USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {creds['accessToken']}",
+                "anthropic-beta": "oauth-2025-04-20",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+
+    creds = fresh_claude_creds()
+    try:
+        data = fetch(creds)
+    except urllib.error.HTTPError as e:
+        if e.code != 401:
+            raise
+        # rejected despite a not-yet-expired timestamp — force a refresh, retry once
+        creds = refresh_claude_token(keychain_item())
+        data = fetch(creds)
 
     tiles = []
     for limit in data.get("limits", []):
@@ -333,7 +404,15 @@ def main() -> int:
         "updated_at": datetime.now().astimezone().strftime("%a %H:%M"),
     }
 
+    state: dict = {}
+    if STATE_PATH.exists():
+        try:
+            state = json.loads(STATE_PATH.read_text())
+        except (OSError, json.JSONDecodeError):
+            pass
+
     errors: list[str] = []
+    failed: list[str] = []
     for fetch, ok_flag in [
         (get_claude_usage, "claude_ok"),
         (get_codex_usage, "codex_ok"),
@@ -342,13 +421,32 @@ def main() -> int:
     ]:
         section = ok_flag[:-3]
         try:
-            merge_vars.update(fetch())
+            result = fetch()
+            merge_vars.update(result)
             merge_vars[ok_flag] = True
+            state[section] = {"at": datetime.now().astimezone().strftime("%a %H:%M"), "data": result}
         except Exception as e:
             log(f"{section} fetch failed: {e}")
-            merge_vars[ok_flag] = False
-            errors.append(f"{section}: {str(e)[:80]}")
+            failed.append(section)
+            cached = state.get(section)
+            if cached:
+                # serve last-known-good data, marked with when it was fetched
+                for key, value in cached["data"].items():
+                    merge_vars[key] = (
+                        {**value, "stale": cached["at"]} if key.endswith("_group") else value
+                    )
+                merge_vars[ok_flag] = True
+                if not any(k.endswith("_group") for k in cached["data"]):
+                    errors.append(f"{section}: data from {cached['at']}")
+            else:
+                merge_vars[ok_flag] = False
+                errors.append(f"{section}: {str(e)[:80]}")
     merge_vars["errors"] = errors  # rendered as a warning strip on the device
+
+    try:
+        STATE_PATH.write_text(json.dumps(state))
+    except OSError as e:
+        log(f"WARNING: could not write state cache: {e}")
 
     # provider groups for the template (header stated once per group)
     merge_vars["gauge_groups"] = [
@@ -360,7 +458,7 @@ def main() -> int:
     log(f"payload ({len(body)} bytes): {body}")
 
     if args.dry_run:
-        return 1 if errors else 0
+        return 1 if failed else 0
 
     req = urllib.request.Request(
         webhook_url,
@@ -379,8 +477,9 @@ def main() -> int:
             log("webhook rate-limited (429), data not delivered this round")
             return 1
         raise
-    # non-zero when any section failed, so launchctl/logs show degraded runs
-    return 1 if errors else 0
+    # non-zero when any section failed (even if stale data was served),
+    # so launchctl/logs show degraded runs
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

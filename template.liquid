@@ -9,7 +9,7 @@
   <div style="display: flex; gap: 30px;">
     {% for group in gauge_groups %}
     <div style="flex: {{ group.tiles | size }}; min-width: 0;">
-      <div style="font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;">{{ group.who }}</div>
+      <div style="font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;">{{ group.who }}{% if group.stale %} <span style="font-weight: normal; text-transform: none; letter-spacing: 0;">&#9888; data from {{ group.stale }}</span>{% endif %}</div>
       <div style="display: flex; gap: 18px;">
         {% for g in group.tiles %}
           {% if g.pct >= 90 %}
@@ -44,7 +44,7 @@
     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
       {% if costs_ok %}
         <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 14px;">
-          <span style="font-size: 18px; font-weight: bold;">API-equivalent $ / day</span>
+          <span style="font-size: 18px; font-weight: bold;">API-equivalent $</span>
           <span style="font-size: 18px;">${{ cost_week }} · 7d</span>
         </div>
         <div style="display: flex; align-items: flex-end; gap: 13px; flex: 1;">
