@@ -10,7 +10,7 @@
     <string>/Users/pmigdal/.local/share/mise/installs/uv/latest/uv-aarch64-apple-darwin/uv</string>
     <string>run</string>
     <string>--no-project</string>
-    <string>/Users/pmigdal/my_repos/vibe_coding/trmnlx/push_usage.py</string>
+    <string>/Users/pmigdal/my_repos/vibe_coding/trmnlx-claude-code-codex-usage/push_usage.py</string>
   </array>
 
   <!-- every 10 minutes; missed runs (sleep) fire once on wake -->
