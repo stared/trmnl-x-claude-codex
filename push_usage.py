@@ -39,6 +39,7 @@ OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code's public
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 STATE_PATH = Path(__file__).parent / "state.json"  # last-known-good data per section
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 CONFIG: dict = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
@@ -155,7 +156,9 @@ def get_claude_usage() -> dict:
     tiles = []
     for limit in data.get("limits", []):
         pct = round(limit.get("percent") or 0)
-        reset = fmt_reset(datetime.fromisoformat(limit["resets_at"]))
+        # resets_at is null for a window that hasn't started (e.g. idle 5h session)
+        resets_at = limit.get("resets_at")
+        reset = fmt_reset(datetime.fromisoformat(resets_at)) if resets_at else "—"
         kind = limit.get("kind")
         if kind == "session":
             tiles.append({"win": "Session 5h", "pct": pct, "reset": reset})
@@ -295,8 +298,9 @@ def get_daily_costs() -> dict:
 
 
 def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
-    """Map session UUID -> project basename (real cwd read from the JSONL),
-    and project basename -> its JSONL files."""
+    """Map ccusage session id -> project basename (real cwd read from the
+    JSONL), and project basename -> its JSONL files. Claude Code and Codex
+    sessions in the same directory merge into one project."""
     by_session: dict[str, str] = {}
     files_by_name: dict[str, list[Path]] = {}
     for project_dir in CLAUDE_PROJECTS_DIR.iterdir():
@@ -320,6 +324,22 @@ def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
             by_session[jsonl.stem] = name
         if name:
             files_by_name.setdefault(name, []).extend(jsonls)
+
+    # Codex: ccusage's session id is the rollout path relative to sessions/,
+    # and the first line (session_meta) carries the cwd
+    start = datetime.now().date() - timedelta(days=COST_DAYS - 1)
+    for jsonl in CODEX_SESSIONS_DIR.glob("*/*/*/rollout-*.jsonl"):
+        try:
+            if datetime.fromtimestamp(jsonl.stat().st_mtime).date() < start:
+                continue
+            with jsonl.open() as f:
+                cwd = (json.loads(f.readline()).get("payload") or {}).get("cwd")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if cwd:
+            name = Path(cwd).name
+            by_session[jsonl.relative_to(CODEX_SESSIONS_DIR).with_suffix("").as_posix()] = name
+            files_by_name.setdefault(name, []).append(jsonl)
     return by_session, files_by_name
 
 
@@ -327,7 +347,8 @@ def day_series(files: list[Path]) -> list[float]:
     """Cost-weighted token activity per local day (oldest first) from JSONLs.
 
     Relative pricing weights (input=1): output 5x, cache read 0.1x,
-    cache write 1.25x. Sparklines are scaled to each project's own peak,
+    cache write 1.25x. Handles both Claude Code (message.usage) and Codex
+    (token_count events; input_tokens there includes cached). Sparklines are scaled to each project's own peak,
     so relative weights are as informative as exact dollars.
     """
     today = datetime.now().date()
@@ -337,27 +358,41 @@ def day_series(files: list[Path]) -> list[float]:
         try:
             if datetime.fromtimestamp(path.stat().st_mtime).date() < start:
                 continue
+            prev_total = None  # Codex re-emits token_count without new usage
             with path.open() as f:
                 for line in f:
-                    if '"usage"' not in line:
+                    if '"usage"' not in line and '"token_count"' not in line:
                         continue
                     try:
                         entry = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    usage = (entry.get("message") or {}).get("usage")
                     ts = entry.get("timestamp")
-                    if not usage or not ts:
+                    if not ts:
                         continue
-                    day = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().date()
-                    idx = (day - start).days
-                    if 0 <= idx < COST_DAYS:
-                        series[idx] += (
+                    if usage := (entry.get("message") or {}).get("usage"):
+                        weight = (
                             (usage.get("input_tokens") or 0)
                             + 5.0 * (usage.get("output_tokens") or 0)
                             + 0.1 * (usage.get("cache_read_input_tokens") or 0)
                             + 1.25 * (usage.get("cache_creation_input_tokens") or 0)
                         )
+                    else:
+                        info = (entry.get("payload") or {}).get("info") or {}
+                        usage = info.get("last_token_usage")
+                        if not usage or info.get("total_token_usage") == prev_total:
+                            continue
+                        prev_total = info.get("total_token_usage")
+                        cached = usage.get("cached_input_tokens") or 0
+                        weight = (
+                            (usage.get("input_tokens") or 0) - cached
+                            + 5.0 * (usage.get("output_tokens") or 0)
+                            + 0.1 * cached
+                        )
+                    day = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().date()
+                    idx = (day - start).days
+                    if 0 <= idx < COST_DAYS:
+                        series[idx] += weight
         except OSError:
             continue
     return series
@@ -374,7 +409,7 @@ def get_top_projects() -> dict:
     totals: dict[str, float] = {}
     for r in rows:
         name = by_session.get(r.get("period", ""))
-        if name:  # skips non-Claude agents' sessions
+        if name:  # skips agents without a session->project mapping
             totals[name] = totals.get(name, 0) + (r.get("totalCost") or 0)
 
     top = sorted(totals.items(), key=lambda kv: -kv[1])[:TOP_PROJECTS]
@@ -430,14 +465,10 @@ def main() -> int:
             failed.append(section)
             cached = state.get(section)
             if cached:
-                # serve last-known-good data, marked with when it was fetched
-                for key, value in cached["data"].items():
-                    merge_vars[key] = (
-                        {**value, "stale": cached["at"]} if key.endswith("_group") else value
-                    )
+                # serve last-known-good data; the strip says when it was fetched
+                merge_vars.update(cached["data"])
                 merge_vars[ok_flag] = True
-                if not any(k.endswith("_group") for k in cached["data"]):
-                    errors.append(f"{section}: data from {cached['at']}")
+                errors.append(f"{section}: data from {cached['at']}")
             else:
                 merge_vars[ok_flag] = False
                 errors.append(f"{section}: {str(e)[:80]}")
