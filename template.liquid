@@ -1,9 +1,9 @@
 <!-- Paste into the Private Plugin "Markup" editor on trmnl.com.
      TRMNL X renders at a ~936x702 logical viewport (2x pixel density).
      Layout: provider gauge groups + $/day chart + top-project bars.
-     Tiles at >=90% invert to black. No title bar; "updated" sits bottom-right. -->
+     Tiles at >=90% invert to black. No title bar; "updated" sits in the chart legend row. -->
 
-<div style="height: 100%; display: flex; flex-direction: column; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 26px 28px 14px 28px; box-sizing: border-box;">
+<div style="height: 100%; display: flex; flex-direction: column; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 26px 28px 20px 28px; box-sizing: border-box;">
 
   <!-- gauge groups: provider named once, tiles share the row -->
   <div style="display: flex; gap: 30px;">
@@ -63,10 +63,13 @@
           <div style="flex: 1; font-size: 14px; text-align: center; color: #555;">{{ day.d }}</div>
           {% endfor %}
         </div>
-        <div style="font-size: 13px; color: #555; margin-top: 10px;">
+        <div style="display: flex; justify-content: space-between; font-size: 13px; color: #555; margin-top: 10px;">
+          <span>
           {% for item in cost_legend %}
           <span style="display: inline-block; width: 12px; height: 12px; background: {{ item.s }};"></span> {{ item.label }}{% unless forloop.last %}&nbsp;&nbsp;{% endunless %}
           {% endfor %}
+          </span>
+          <span>updated {{ updated_at }}</span>
         </div>
       {% endif %}
     </div>
@@ -76,7 +79,7 @@
       {% if projects_ok %}
         <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #000; padding-bottom: 7px; margin-bottom: 8px;">
           <span style="font-size: 18px; font-weight: bold;">Top projects · 7d</span>
-          <span style="font-size: 14px; color: #555;">Claude Code + Codex</span>
+          <span style="font-size: 13px; color: #555;"><span style="display: inline-block; width: 12px; height: 12px; background: #000;"></span> Claude Code&nbsp;&nbsp;<span style="display: inline-block; width: 12px; height: 12px; background: #777;"></span> Codex</span>
         </div>
         <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-around;">
           {% for project in top_projects %}
@@ -85,10 +88,14 @@
               <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;">{{ project.name }}</span>
               <span style="font-weight: bold;">${{ project.c }}</span>
             </div>
-            <!-- 7-day sparkline, same day columns as the chart on the left -->
-            <div style="display: flex; align-items: flex-end; gap: 5px; height: 26px; border-bottom: 1px solid #999;">
+            <!-- 7-day sparkline, same day columns and shades as the chart on the left -->
+            <div style="display: flex; align-items: flex-end; gap: 5px; height: 30px; border-bottom: 1px solid #999;">
               {% for h in project.s %}
-              <div style="flex: 1; background: #000; height: {{ h | times: 26 | divided_by: 100 }}px;"></div>
+              {% assign hx = project.x[forloop.index0] %}
+              <div style="flex: 1;">
+                <div style="background: #777; height: {{ hx | times: 30 | divided_by: 100 }}px;"></div>
+                <div style="background: #000; height: {{ h | times: 30 | divided_by: 100 }}px;"></div>
+              </div>
               {% endfor %}
             </div>
           </div>
@@ -104,7 +111,5 @@
     &#9888; {{ errors | join: " &nbsp;·&nbsp; " }}
   </div>
   {% endif %}
-
-  <div style="text-align: right; font-size: 13px; color: #555; margin-top: 10px;">updated {{ updated_at }}</div>
 
 </div>

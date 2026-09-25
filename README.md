@@ -41,13 +41,13 @@ on the device and exit non-zero.
 | `webhook_url` | — | required (or `TRMNL_WEBHOOK_URL` env var) |
 | `cost_days` | 7 | days in the cost chart and sparklines |
 | `top_projects` | 6 | project rows |
-| `chart_max_px` | 230 | tallest chart bar, px |
+| `chart_max_px` | 300 | tallest chart bar, px |
 
 ## Notes
 
 - The template targets TRMNL X's logical viewport (~936×702 @ 2× density);
   tiles at ≥90% usage invert to black.
 - TRMNL webhook caps: 12 pushes/hour, 2 KB payload.
-- The screen goes stale while the Mac sleeps — see the "updated" stamp.
+- The screen goes stale while the Mac sleeps — see the "updated" stamp next to the chart legend.
 
 MIT © Piotr Migdał

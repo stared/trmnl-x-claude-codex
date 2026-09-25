@@ -40,12 +40,15 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 STATE_PATH = Path(__file__).parent / "state.json"  # last-known-good data per section
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
+# fixed label + shade per agent, shared by the $/day chart and project sparklines
+AGENT_STYLE = {"claude": ("Claude Code", "#000"), "codex": ("Codex", "#777")}
+OTHER_SHADES = ["#aaa", "#ccc"]  # other named agents by rank; last one also = lump
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 CONFIG: dict = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
 COST_DAYS = int(CONFIG.get("cost_days", 7))
 TOP_PROJECTS = int(CONFIG.get("top_projects", 6))
-CHART_MAX_PX = int(CONFIG.get("chart_max_px", 230))  # tallest chart bar
+CHART_MAX_PX = int(CONFIG.get("chart_max_px", 300))  # tallest chart bar
 
 
 def log(msg: str) -> None:
@@ -245,8 +248,6 @@ def get_daily_costs() -> dict:
     the remainder is lumped as 'other'.
     """
     NAMED_AGENTS = 3
-    SHADES = ["#000", "#777", "#aaa"]  # by rank; lump uses LUMP_SHADE
-    LUMP_SHADE = "#ccc"
 
     rows = run_ccusage("daily", "--by-agent").get("daily", [])
     cost: dict[str, dict[str, float]] = {}  # agent -> day -> $
@@ -260,6 +261,12 @@ def get_daily_costs() -> dict:
     ranked = sorted(cost, key=lambda a: -sum(cost[a].values()))
     ranked.sort(key=lambda a: a != "claude")  # Claude first, keep cost order after
     named, lumped = ranked[:NAMED_AGENTS], ranked[NAMED_AGENTS:]
+    others = iter(OTHER_SHADES)
+    style = {
+        a: AGENT_STYLE.get(a) or (a.capitalize(), next(others, OTHER_SHADES[-1]))
+        for a in named
+    }
+    lump_shade = OTHER_SHADES[-1]
 
     today = datetime.now().date()
     dates = [(today - timedelta(days=i)) for i in range(COST_DAYS - 1, -1, -1)]
@@ -272,11 +279,11 @@ def get_daily_costs() -> dict:
     for d in dates:
         key = d.isoformat()
         segs = [
-            {"h": round(CHART_MAX_PX * cost[a].get(key, 0) / max_cost), "s": SHADES[i]}
-            for i, a in enumerate(named)
+            {"h": round(CHART_MAX_PX * cost[a].get(key, 0) / max_cost), "s": style[a][1]}
+            for a in named
         ] + [{
             "h": round(CHART_MAX_PX * sum(cost[a].get(key, 0) for a in lumped) / max_cost),
-            "s": LUMP_SHADE,
+            "s": lump_shade,
         }]
         days.append({
             "d": d.strftime("%a")[:2],
@@ -284,12 +291,9 @@ def get_daily_costs() -> dict:
             "seg": [s for s in segs if s["h"] > 0],
         })
 
-    legend = [
-        {"label": "Claude Code" if a == "claude" else a, "s": SHADES[i]}
-        for i, a in enumerate(named)
-    ]
+    legend = [{"label": style[a][0], "s": style[a][1]} for a in named]
     if lumped:
-        legend.append({"label": "other", "s": LUMP_SHADE})
+        legend.append({"label": "Other", "s": lump_shade})
     return {
         "cost_days": days,
         "cost_week": round(sum(per_day_totals.values())),
@@ -297,12 +301,12 @@ def get_daily_costs() -> dict:
     }
 
 
-def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
+def scan_projects() -> tuple[dict[str, str], dict[str, dict[str, list[Path]]]]:
     """Map ccusage session id -> project basename (real cwd read from the
-    JSONL), and project basename -> its JSONL files. Claude Code and Codex
+    JSONL), and project basename -> agent -> its JSONL files. Claude Code and Codex
     sessions in the same directory merge into one project."""
     by_session: dict[str, str] = {}
-    files_by_name: dict[str, list[Path]] = {}
+    files_by_name: dict[str, dict[str, list[Path]]] = {}
     for project_dir in CLAUDE_PROJECTS_DIR.iterdir():
         if not project_dir.is_dir():
             continue
@@ -323,7 +327,7 @@ def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
                     name = project_dir.name.rsplit("-", 1)[-1]
             by_session[jsonl.stem] = name
         if name:
-            files_by_name.setdefault(name, []).extend(jsonls)
+            files_by_name.setdefault(name, {}).setdefault("claude", []).extend(jsonls)
 
     # Codex: ccusage's session id is the rollout path relative to sessions/,
     # and the first line (session_meta) carries the cwd
@@ -339,7 +343,7 @@ def scan_projects() -> tuple[dict[str, str], dict[str, list[Path]]]:
         if cwd:
             name = Path(cwd).name
             by_session[jsonl.relative_to(CODEX_SESSIONS_DIR).with_suffix("").as_posix()] = name
-            files_by_name.setdefault(name, []).append(jsonl)
+            files_by_name.setdefault(name, {}).setdefault("codex", []).append(jsonl)
     return by_session, files_by_name
 
 
@@ -399,7 +403,8 @@ def day_series(files: list[Path]) -> list[float]:
 
 
 def get_top_projects() -> dict:
-    """Top projects by 7d cost (ccusage), each with a per-day sparkline series.
+    """Top projects by 7d cost (ccusage), each with per-day sparkline series
+    for Claude Code ("s") and Codex ("x"), stacked in the template.
 
     ccusage session totals aren't range-scoped per day, so the sparkline
     comes from the project's own JSONLs via a price-weighted token proxy.
@@ -415,12 +420,15 @@ def get_top_projects() -> dict:
     top = sorted(totals.items(), key=lambda kv: -kv[1])[:TOP_PROJECTS]
     projects = []
     for name, cost in top:
-        series = day_series(files_by_name.get(name, []))
-        peak = max(series) or 1
+        files = files_by_name.get(name, {})
+        claude = day_series(files.get("claude", []))
+        codex = day_series(files.get("codex", []))
+        peak = max(c + x for c, x in zip(claude, codex)) or 1  # scaled to own peak
         projects.append({
             "name": name[:24],
             "c": round(cost),
-            "s": [round(100 * v / peak) for v in series],  # scaled to own peak
+            "s": [round(100 * v / peak) for v in claude],
+            "x": [round(100 * v / peak) for v in codex],
         })
     return {"top_projects": projects}
 

@@ -2,5 +2,5 @@
   "webhook_url": "https://trmnl.com/api/custom_plugins/YOUR-PLUGIN-UUID",
   "cost_days": 7,
   "top_projects": 6,
-  "chart_max_px": 230
+  "chart_max_px": 300
 }
